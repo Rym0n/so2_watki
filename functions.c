@@ -61,8 +61,32 @@ void *join_function(void *var) {
         if (thread_helper->thread_bool == false)
             break;
 
+        if (global_server->players >= 2) {
+            request->number = -1;
+        }
+        else{
+            uint player_index = (request->type == 2) ? 2 : 0;
+            for (; player_index < 3; ++player_index) {
+                if (global_server->players_and_bots[player_index] == NULL)
+                    break;
+            }
 
-        add_player(request); //todo usunąc funkcje add_player i skopiowac do srodka
+            shared_memory_player(request, player_index + 1);
+
+            global_server->players++;
+
+            set_position(player_index + 1);
+
+
+            pthread_t new_thread;
+            global_server->players_and_bots[player_index]->thread_bool = true;
+            pthread_create(&new_thread, NULL, player_function, NULL);
+            global_server->players_and_bots[player_index]->thread_pointer = new_thread;
+
+            request->PID = getpid();
+            request->number = player_index + 1;
+        }
+
 
         sem_post(&request->sem3);
         sem_wait(&request->sem2);
@@ -94,7 +118,6 @@ void *clock_function(void *var) {
 }
 
 int shared_memory_player(Lobby *lobby_data, uint number) {
-
 
     if (number > 3) {
 
@@ -136,9 +159,9 @@ int shared_memory_player(Lobby *lobby_data, uint number) {
     player->number = number;
 
     player->PID = lobby_data->pid_join;
-    player->type_player = lobby_data->type;
     player->game_server_PID = getpid();
     player->is_this_new_player = true;
+    player->type_player = lobby_data->type;
 
     uint x, y;
     random_point_player(&x, &y, number);
@@ -146,54 +169,21 @@ int shared_memory_player(Lobby *lobby_data, uint number) {
     player->spanwer_posiition_x = player->player_x = x;
     player->spanwer_posiition_y = player->player_y = y;
 
-    player->klawisz = ZERO;
     player->frezze = 1;
+    player->klawisz = ZERO;
 
     sem_init(&player->game_sem, 1, 0);
-    sem_init(&player->player_sem, 1, 0);
     sem_init(&player->new_data_sem, 1, 1);
+    sem_init(&player->player_sem, 1, 0);
 
-    global_server->players_and_bots[number - 1]->fd = shm_player;
     global_server->players_and_bots[number - 1]->data = player;
+    global_server->players_and_bots[number - 1]->fd = shm_player;
 
     send_map(number);
-
 
     return 0;
 }
 
-void add_player(Lobby *join_info) {
-
-
-    if (global_server->players >= 2) {
-        join_info->number = -1;
-        return;
-    }
-
-
-    uint player_index = (join_info->type == 2) ? 2 : 0;
-    for (; player_index < 3; ++player_index) {
-        if (global_server->players_and_bots[player_index] == NULL)
-            break;
-    }
-
-    shared_memory_player(join_info, player_index + 1);
-
-    global_server->players++;
-
-    set_position(player_index + 1);
-
-
-    pthread_t new_thread;
-    global_server->players_and_bots[player_index]->thread_bool = true;
-    pthread_create(&new_thread, NULL, player_function, NULL);
-    global_server->players_and_bots[player_index]->thread_pointer = new_thread;
-
-    join_info->PID = getpid();
-    join_info->number = player_index + 1;
-
-
-}
 
 void *player_function(void *var) {
     Threads_For_Player_Timer_Lobby *thread_helper;
@@ -251,11 +241,16 @@ int player_press_key(Players_Data *player, enum klawisze key) {
     uint32_t y = player->player_y;
 
     remove_player_from_map(player->number);
-
-    if (key == DOL) player->player_y++;
-    else if (key == GORA) player->player_y--;
-    else if (key == PRAWO) player->player_x++;
-    else if (key == LEWO) player->player_x--;
+    switch(key){
+        case DOL : player->player_y++;
+                    break;
+        case GORA : player->player_y--;
+            break;
+        case PRAWO : player->player_x++;
+            break;
+        case LEWO : player->player_x--;
+            break;
+    }
 
     int test = player_rules(player);
     if (test) {
@@ -300,7 +295,6 @@ int send_map(uint number) {
     int y = (int) player->player_y - (5 / 2);
 
     copy_map(x, y, player->player_map_fov);
-
 
     return 0;
 }
@@ -541,8 +535,6 @@ void new_round() {
 
 int delete_player(uint number) {
     Threads_For_Player_Timer_Lobby *toDelete = global_server->players_and_bots[number - 1];
-    if (toDelete == NULL)
-        return -1;
 
     Players_Data *player = (Players_Data *) toDelete->data;
     player->type_player = 3;
@@ -571,7 +563,7 @@ int delete_player(uint number) {
     munmap(player, sizeof(Players_Data *));
     close(toDelete->fd);
 
-    // HARD CODED; MUST CHANGE
+
     if (number == 1) {
         shm_unlink("GRACZ_1");
         global_server->players--;
@@ -807,7 +799,7 @@ void run_game() {
     WINDOW *map_window = newwin(25, 51, 0, 0);
     WINDOW *info = newwin(100, 200, 0, 51 + 5);
 
-    Threads_For_Player_Timer_Lobby *beast = NULL;
+    Threads_For_Player_Timer_Lobby *beast = add_enenmy();
     pthread_t keyboard_thread;
     pthread_create(&keyboard_thread, NULL, read_keyboard, NULL);
     int *n;
@@ -1109,9 +1101,9 @@ void draw_info_for_game(WINDOW *playerInfo, Game *server) {
     mvwprintw(playerInfo, 20, 29, "*    - wild beast");
     mvwprintw(playerInfo, 21, 29, "c    - one coin");
     mvwprintw(playerInfo, 22, 29, "t    - treasure (10 coins)");
-    mvwprintw(playerInfo, 22, 29, "T    - large treasure (50 coins)");
-    mvwprintw(playerInfo, 22, 29, "A    - campsite");
-    mvwprintw(playerInfo, 22, 29, "D    - dropped treasure");
+    mvwprintw(playerInfo, 23, 29, "T    - large treasure (50 coins)");
+    mvwprintw(playerInfo, 24, 29, "A    - campsite");
+    mvwprintw(playerInfo, 25, 29, "D    - dropped treasure");
 
 
     int x = strlen("Parameter:   ");
@@ -1176,22 +1168,11 @@ void draw_info_for_player(WINDOW *playerModel, Players_Data *playerInfoModel) {
     mvwprintw(playerModel, 20, 29, "*    - wild beast");
     mvwprintw(playerModel, 21, 29, "c    - one coin");
     mvwprintw(playerModel, 22, 29, "t    - treasure (10 coins)");
-    mvwprintw(playerModel, 22, 29, "T    - large treasure (50 coins)");
-    mvwprintw(playerModel, 22, 29, "A    - campsite");
-    mvwprintw(playerModel, 22, 29, "D    - dropped treasure");
+    mvwprintw(playerModel, 23, 29, "T    - large treasure (50 coins)");
+    mvwprintw(playerModel, 24, 29, "A    - campsite");
+    mvwprintw(playerModel, 25, 29, "D    - dropped treasure");
 }
 
-int random_point(uint *x, uint *y) {
-    while (1) {
-        *x = rand() % 51;
-        *y = rand() % 25;
-
-        if (global_server_map[*y * 51 + *x] == ' ')
-            break;
-    }
-
-    return 0;
-}
 
 int random_point_player(uint *x, uint *y, uint number) {
 
@@ -1219,7 +1200,13 @@ int random_point_player(uint *x, uint *y, uint number) {
 void add_point(int point_char) {
     uint x, y;
 
-    random_point(&x, &y);
+    while (1) {
+        x = rand() % 51;
+        y = rand() % 25;
+
+        if (global_server_map[y * 51 + x] == ' ')
+            break;
+    }
 
     global_server_map[y * 51 + x] = (char) point_char;
 }

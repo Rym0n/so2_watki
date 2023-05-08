@@ -23,14 +23,12 @@ int main()
     }
     else
     {
-        Players_Data *player;
-
         start_data_transfer(1);
 
         run_player();
     }
 
-    printf("Disconnected correctly\n");
+    printf("You have disconnected\n");
 
     return 0;
 }
